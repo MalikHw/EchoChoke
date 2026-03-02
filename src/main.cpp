@@ -7,10 +7,8 @@
 #include <chrono>
 #include <thread>
 #include <regex>
-
 using namespace geode::prelude;
 namespace fs = std::filesystem;
-
 class $modify(MyPlayLayer, PlayLayer) {
     struct Fields {
         std::vector<std::string> m_roasts;
@@ -19,14 +17,11 @@ class $modify(MyPlayLayer, PlayLayer) {
         async::TaskHolder<utils::web::WebResponse> m_task;
         std::mt19937 m_rng;
     };
-
     bool init(GJGameLevel* level, bool useReplay, bool dontSave) {
         if (!PlayLayer::init(level, useReplay, dontSave)) return false;
-        
         if (!m_fields->m_loaded) {
             std::random_device rd;
             m_fields->m_rng = std::mt19937(rd());
-            
             auto roastFile = Mod::get()->getSaveDir() / "roasts.txt";
             if (!fs::exists(roastFile)) {
                 std::ofstream file(roastFile);
@@ -68,13 +63,11 @@ class $modify(MyPlayLayer, PlayLayer) {
                 file << "bro really thought he was him until {}% happened 🙏 ()\n";
                 file.close();
             }
-            
             std::ifstream rFile(roastFile);
             std::string rLine;
             while (std::getline(rFile, rLine)) {
                 if (!rLine.empty()) m_fields->m_roasts.push_back(rLine);
             }
-
             auto congratsFile = Mod::get()->getSaveDir() / "congrats.txt";
             if (!fs::exists(congratsFile)) {
                 std::ofstream file(congratsFile);
@@ -82,7 +75,6 @@ class $modify(MyPlayLayer, PlayLayer) {
                 file << "massive W on [] after <> attempts! 😭\n";
                 file.close();
             }
-            
             std::ifstream cFile(congratsFile);
             std::string cLine;
             while (std::getline(cFile, cLine)) {
@@ -92,20 +84,16 @@ class $modify(MyPlayLayer, PlayLayer) {
         }
         return true;
     }
-
     void destroyPlayer(PlayerObject* player, GameObject* obj) {
         bool isInvalid = m_isPracticeMode || m_isTestMode || m_level->isPlatformer();
         if (isInvalid || Mod::get()->getSettingValue<bool>("disable_roasts")) {
             PlayLayer::destroyPlayer(player, obj);
             return;
         }
-
         int percent = this->getCurrentPercentInt();
         auto minPercent = Mod::get()->getSettingValue<int64_t>("min_percent");
         bool isNewBest = percent > m_level->m_normalPercent;
-
         PlayLayer::destroyPlayer(player, obj);
-
         if (isNewBest && percent >= minPercent) {
             this->getScheduler()->scheduleSelector(
                 schedule_selector(MyPlayLayer::captureAndSendRoast),
@@ -113,56 +101,44 @@ class $modify(MyPlayLayer, PlayLayer) {
             );
         }
     }
-
     void levelComplete() {
         bool isInvalid = m_isPracticeMode || m_isTestMode || m_level->isPlatformer();
         PlayLayer::levelComplete();
         if (isInvalid) return;
-
         this->getScheduler()->scheduleSelector(
             schedule_selector(MyPlayLayer::captureAndSendCongrats),
             this, 0.1f, 0, 0.0f, false
         );
     }
-
     void captureAndSendRoast(float dt) { this->sendToDiscord(false); }
     void captureAndSendCongrats(float dt) { this->sendToDiscord(true); }
-
     std::string getResolutionString() {
-        auto size = CCDirector::sharedDirector()->getOpenGLView()->getFrameSize();
+        auto size = CCDirector::sharedDirector()->getWinSize();
         return std::to_string((int)size.width) + "x" + std::to_string((int)size.height);
     }
-
     std::string formatCustomMessage(std::string msg, int percent) {
         std::string userName = GJAccountManager::sharedState()->m_username;
         if (userName.empty()) userName = "Guest";
-
         std::string levelName = m_level->m_levelName;
         std::string attempts = std::to_string(m_level->m_attempts);
-        
         int totalSeconds = static_cast<int>(m_level->m_workingTime);
         int mins = totalSeconds / 60;
         int secs = totalSeconds % 60;
         std::string timeStr = fmt::format("{:02}:{:02}", mins, secs);
-
         msg = std::regex_replace(msg, std::regex("\\(\\)"), userName);
         msg = std::regex_replace(msg, std::regex("\\[\\]"), levelName);
         msg = std::regex_replace(msg, std::regex("\\{\\}"), std::to_string(percent));
         msg = std::regex_replace(msg, std::regex("<>"), attempts);
         msg = std::regex_replace(msg, std::regex("!!"), timeStr);
         msg = std::regex_replace(msg, std::regex("~~"), getResolutionString());
-
         return msg;
     }
-
     void sendToDiscord(bool isVictory) {
         auto webhook = Mod::get()->getSettingValue<std::string>("webhook_url");
         if (webhook.empty()) return;
-
         std::string rawMessage;
         int percent = isVictory ? 100 : this->getCurrentPercentInt();
         auto& rng = m_fields->m_rng;
-
         if (isVictory) {
             if (m_fields->m_congrats.empty()) {
                 rawMessage = "GG! () just beat []! 🥂";
@@ -177,7 +153,6 @@ class $modify(MyPlayLayer, PlayLayer) {
                 std::uniform_int_distribution dis(0, (int)m_fields->m_roasts.size() - 1);
                 rawMessage = m_fields->m_roasts[dis(rng)];
             }
-            
             bool shouldPing = Mod::get()->getSettingValue<bool>("enable_ping");
             auto threshold = Mod::get()->getSettingValue<int64_t>("ping_threshold");
             std::string roleId = Mod::get()->getSettingValue<std::string>("role_id");
@@ -185,40 +160,34 @@ class $modify(MyPlayLayer, PlayLayer) {
                 rawMessage = "<@&" + roleId + "> " + rawMessage;
             }
         }
-
         std::string finalMessage = formatCustomMessage(rawMessage, percent);
-
         auto winSize = CCDirector::sharedDirector()->getWinSize();
         auto renderer = CCRenderTexture::create((int)winSize.width, (int)winSize.height);
         if (!renderer) return;
-
         renderer->beginWithClear(0, 0, 0, 0);
         this->visit();
         renderer->end();
-
         auto img = renderer->newCCImage(true);
         if (!img) return;
-
         auto path = Mod::get()->getSaveDir() / "ss.png";
-        
-        std::thread([this, path, finalMessage, webhook, img]() {
+        std::thread([this, path, finalMessage, webhook, img]() mutable {
             bool ok = img->saveToFile(path.string().c_str());
             img->release();
             if (!ok) return;
-
             Loader::get()->queueInMainThread([this, path, finalMessage, webhook]() {
                 utils::web::MultipartForm form;
                 form.param("content", finalMessage);
                 auto file = form.file("file", path, "image/png");
-                
-                if (file.isErr()) return;
-
+                if (file.isErr()) {
+                    fs::remove(path);
+                    return;
+                }
                 auto req = utils::web::WebRequest()
                     .bodyMultipart(form)
                     .timeout(std::chrono::seconds(15))
                     .post(webhook);
-
-                m_fields->m_task.spawn(std::move(req), [](utils::web::WebResponse res) {
+                m_fields->m_task.spawn(std::move(req), [path](utils::web::WebResponse res) {
+                    fs::remove(path);
                     if (res.ok()) {
                         log::info("sent to discord");
                     } else {
@@ -229,3 +198,4 @@ class $modify(MyPlayLayer, PlayLayer) {
         }).detach();
     }
 };
+// PLEASE COMPILE
