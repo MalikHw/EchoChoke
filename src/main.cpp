@@ -60,8 +60,7 @@ class $modify(MyPlayLayer, PlayLayer) {
                 file << "{}% is the new 100% for people who can't play 🥂\n";
                 file << "imagine being this consistent at failing at {}% 😭\n";
                 file << "{}%... i'm deleting the webhook so i don't have to see this trash 💀\n";
-                file << "bro really thought he was him until {}% happened 🙏 ()\n"
-                    "meow\n";
+                file << "bro really thought he was him until {}% happened 🙏 ()\n";
                 file.close();
             }
             std::ifstream rFile(roastFile);
@@ -199,4 +198,4 @@ class $modify(MyPlayLayer, PlayLayer) {
         }).detach();
     }
 };
-// hi whoever is reviewing this
+// hi whoever is reviewing this 
