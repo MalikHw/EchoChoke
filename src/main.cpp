@@ -13,7 +13,7 @@ class $modify(MyPlayLayer, PlayLayer) {
         std::vector<std::string> m_roasts;
         std::vector<std::string> m_congrats;
         bool m_loaded = false;
-        async::TaskHolder<utils::web::WebResponse> m_task;
+        EventListener<utils::web::WebTask> m_task;
         std::mt19937 m_rng;
     };
 
@@ -53,7 +53,7 @@ class $modify(MyPlayLayer, PlayLayer) {
                     "bro really choked at {}% on []... just uninstall already 💀\n"
                     "{}%... i've seen bot accounts with better consistency 🙏\n"
                     "imagine dying at {}% in 2026 🥂\n"
-                    "{}% is crazy. xseek professional help 💀\n"
+                    "{}% is crazy. seek professional help 💀\n"
                     "bro's heart rate went to 200 just to fail at {}% 😭 ()\n"
                     "{}%... i'd rather watch paint dry than this gameplay 💀\n"
                     "bro really hit the pause button on life at {}% 🙏\n"
@@ -102,22 +102,16 @@ class $modify(MyPlayLayer, PlayLayer) {
 
     void destroyPlayer(PlayerObject* player, GameObject* obj) {
         bool isInvalid = m_isPracticeMode || m_isTestMode || m_level->isPlatformer();
-        if (isInvalid || Mod::get()->getSettingValue<bool>("disable_roasts")) {
-            PlayLayer::destroyPlayer(player, obj);
-            return;
-        }
-
         int percent = this->getCurrentPercentInt();
         auto minPercent = Mod::get()->getSettingValue<int64_t>("min_percent");
         bool isNewBest = percent > m_level->m_normalPercent;
 
         PlayLayer::destroyPlayer(player, obj);
 
-        if (isNewBest && percent >= minPercent) {
-            this->getScheduler()->scheduleSelector(
-                schedule_selector(MyPlayLayer::captureAndSendRoast),
-                this, 0.1f, 0, 0.0f, false
-            );
+        if (!isInvalid && !Mod::get()->getSettingValue<bool>("disable_roasts")) {
+            if (isNewBest && percent >= minPercent) {
+                this->sendToDiscord(false, percent);
+            }
         }
     }
 
@@ -126,14 +120,8 @@ class $modify(MyPlayLayer, PlayLayer) {
         PlayLayer::levelComplete();
         if (isInvalid) return;
 
-        this->getScheduler()->scheduleSelector(
-            schedule_selector(MyPlayLayer::captureAndSendCongrats),
-            this, 0.1f, 0, 0.0f, false
-        );
+        this->sendToDiscord(true, 100);
     }
-
-    void captureAndSendRoast(float dt) { this->sendToDiscord(false); }
-    void captureAndSendCongrats(float dt) { this->sendToDiscord(true); }
 
     std::string getResolutionString() {
         auto size = CCDirector::sharedDirector()->getWinSize();
@@ -160,26 +148,25 @@ class $modify(MyPlayLayer, PlayLayer) {
         return msg;
     }
 
-    void sendToDiscord(bool isVictory) {
+    void sendToDiscord(bool isVictory, int percent) {
         auto webhook = Mod::get()->getSettingValue<std::string>("webhook_url");
         if (webhook.empty()) return;
 
         std::string rawMessage;
-        int percent = isVictory ? 100 : this->getCurrentPercentInt();
         auto& rng = m_fields->m_rng;
 
         if (isVictory) {
             if (m_fields->m_congrats.empty()) {
                 rawMessage = "GG! () just beat []! 🥂";
             } else {
-                std::uniform_int_distribution dis(0, (int)m_fields->m_congrats.size() - 1);
+                std::uniform_int_distribution<size_t> dis(0, m_fields->m_congrats.size() - 1);
                 rawMessage = m_fields->m_congrats[dis(rng)];
             }
         } else {
             if (m_fields->m_roasts.empty()) {
                 rawMessage = "died at {}% lol get good";
             } else {
-                std::uniform_int_distribution dis(0, (int)m_fields->m_roasts.size() - 1);
+                std::uniform_int_distribution<size_t> dis(0, m_fields->m_roasts.size() - 1);
                 rawMessage = m_fields->m_roasts[dis(rng)];
             }
 
@@ -198,41 +185,35 @@ class $modify(MyPlayLayer, PlayLayer) {
         auto renderer = CCRenderTexture::create((int)winSize.width, (int)winSize.height);
         if (!renderer) return;
 
-        renderer->beginWithClear(0, 0, 0, 0);
+        renderer->begin();
         this->visit();
         renderer->end();
 
-        auto img = renderer->newCCImage(true);
+        auto img = renderer->newCCImage();
         if (!img) return;
 
         auto path = Mod::get()->getSaveDir() / "ss.png";
-
-        auto imageSaved = utils::file::writeBinary(path, {img->getData(), static_cast<size_t>(img->getDataLen())});
-        img->release();
         
-        if (imageSaved.isErr()) return;
-
-        utils::web::MultipartForm form;
-        form.param("content", finalMessage);
-        
-        auto fileRes = form.file("file", path);
-        if (fileRes.isErr()) {
-            (void)fs::remove(path);
+        if (!utils::cocos::saveImage(img, path)) {
+            img->release();
             return;
         }
+        img->release();
 
-        auto req = utils::web::WebRequest()
-            .bodyMultipart(form)
-            .timeout(std::chrono::seconds(15))
-            .post(webhook);
+        utils::web::MultipartForm form;
+        form.add(utils::web::MultipartValue("content", finalMessage));
+        form.add(utils::web::MultipartFile("file", path));
 
-        m_fields->m_task.spawn(std::move(req), [path](utils::web::WebResponse res) {
+        auto req = utils::web::WebRequest();
+        m_fields->m_task.setResponse([path](utils::web::WebResponse* res) {
             (void)fs::remove(path);
-            if (res.ok()) {
+            if (res->isSuccess()) {
                 log::info("sent to discord");
             } else {
-                log::error("webhook failed: {} code {}", res.errorMessage(), res.code());
+                log::error("webhook failed");
             }
         });
+
+        m_fields->m_task.bind(req.post(webhook, form));
     }
 };
