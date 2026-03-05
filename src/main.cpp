@@ -53,7 +53,7 @@ class $modify(MyPlayLayer, PlayLayer) {
                     "bro really choked at {}% on []... just uninstall already 💀\n"
                     "{}%... i've seen bot accounts with better consistency 🙏\n"
                     "imagine dying at {}% in 2026 🥂\n"
-                    "{}% is crazy. seek professional help 💀\n"
+                    "{}% is crazy. xseek professional help 💀\n"
                     "bro's heart rate went to 200 just to fail at {}% 😭 ()\n"
                     "{}%... i'd rather watch paint dry than this gameplay 💀\n"
                     "bro really hit the pause button on life at {}% 🙏\n"
@@ -207,7 +207,7 @@ class $modify(MyPlayLayer, PlayLayer) {
 
         auto path = Mod::get()->getSaveDir() / "ss.png";
 
-        auto imageSaved = utils::file::writeBinary(path, img->getData(), img->getDataLen());
+        auto imageSaved = utils::file::writeBinary(path, {img->getData(), static_cast<size_t>(img->getDataLen())});
         img->release();
         
         if (imageSaved.isErr()) return;
