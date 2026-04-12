@@ -9,6 +9,200 @@ using namespace geode::prelude;
 namespace fs = std::filesystem;
 
 static bool inDestroyPlayer = false;
+
+struct QueuedWebhook {
+    std::string message;
+    std::string imageFile;
+    int64_t timestamp;
+};
+
+static std::vector<QueuedWebhook> s_webhookQueue;
+static bool s_queueLoaded = false;
+static bool s_isFlushing = false;
+
+static fs::path getQueueDir() {
+    return Mod::get()->getSaveDir() / "offline_queue";
+}
+
+static void saveQueueToDisk() {
+    auto dir = getQueueDir();
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+
+    auto indexPath = dir / "index.json";
+    std::string json = "[";
+    for (size_t i = 0; i < s_webhookQueue.size(); i++) {
+        auto& item = s_webhookQueue[i];
+        if (i > 0) json += ",";
+        json += "{\"message\":\"";
+        std::string escaped = item.message;
+        utils::string::replaceIP(escaped, "\\", "\\\\");
+        utils::string::replaceIP(escaped, "\"", "\\\"");
+        utils::string::replaceIP(escaped, "\n", "\\n");
+        json += escaped;
+        json += "\",\"imageFile\":\"" + item.imageFile + "\",\"timestamp\":" + std::to_string(item.timestamp) + "}";
+    }
+    json += "]";
+    (void)utils::file::writeString(utils::string::pathToString(indexPath), json);
+}
+
+static void loadQueueFromDisk() {
+    if (s_queueLoaded) return;
+    s_queueLoaded = true;
+
+    auto dir = getQueueDir();
+    auto indexPath = dir / "index.json";
+    if (!fs::exists(indexPath)) return;
+
+    auto readResult = utils::file::readString(utils::string::pathToString(indexPath));
+    if (!readResult.isOk()) return;
+    std::string content = readResult.unwrap();
+
+    s_webhookQueue.clear();
+
+    size_t pos = 0;
+    while (pos < content.size()) {
+        auto msgStart = content.find("\"message\":\"", pos);
+        if (msgStart == std::string::npos) break;
+        msgStart += 11;
+        std::string msg;
+        bool escaped = false;
+        size_t i = msgStart;
+        for (; i < content.size(); i++) {
+            char c = content[i];
+            if (escaped) {
+                if (c == 'n') msg += '\n';
+                else if (c == '"') msg += '"';
+                else if (c == '\\') msg += '\\';
+                else msg += c;
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                break;
+            } else {
+                msg += c;
+            }
+        }
+        pos = i + 1;
+
+        auto imgStart = content.find("\"imageFile\":\"", pos);
+        if (imgStart == std::string::npos) break;
+        imgStart += 13;
+        auto imgEnd = content.find("\"", imgStart);
+        if (imgEnd == std::string::npos) break;
+        std::string imgFile = content.substr(imgStart, imgEnd - imgStart);
+        pos = imgEnd + 1;
+
+        auto tsStart = content.find("\"timestamp\":", pos);
+        if (tsStart == std::string::npos) break;
+        tsStart += 12;
+        auto tsEnd = content.find_first_of(",}", tsStart);
+        if (tsEnd == std::string::npos) break;
+        int64_t ts = 0;
+        auto tsRes = utils::numFromString<int64_t>(utils::string::trim(content.substr(tsStart, tsEnd - tsStart)));
+        if (tsRes) ts = tsRes.unwrap();
+        pos = tsEnd;
+
+        s_webhookQueue.push_back({ msg, imgFile, ts });
+    }
+}
+
+static void enqueueWebhook(const std::string& message, const std::string& imageFilePath) {
+    loadQueueFromDisk();
+
+    auto dir = getQueueDir();
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+
+    std::string destImg;
+    if (!imageFilePath.empty() && fs::exists(imageFilePath)) {
+        auto destPath = dir / fs::path(imageFilePath).filename();
+        fs::copy_file(imageFilePath, destPath, fs::copy_options::overwrite_existing, ec);
+        destImg = utils::string::pathToString(destPath);
+    }
+
+    int64_t ts = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    s_webhookQueue.push_back({ message, destImg, ts });
+    saveQueueToDisk();
+}
+
+static void tryFlushQueue();
+
+static void flushNext(float) {
+    if (s_webhookQueue.empty()) {
+        s_isFlushing = false;
+        return;
+    }
+
+    auto webhook = Mod::get()->getSettingValue<std::string>("webhook_url");
+    if (webhook.empty()) {
+        s_isFlushing = false;
+        return;
+    }
+
+    auto proxyUrl = Mod::get()->getSettingValue<std::string>("proxy_url");
+    std::string targetUrl = proxyUrl.empty() ? webhook : (proxyUrl + "?wh=" + webhook);
+
+    auto item = s_webhookQueue.front();
+    s_webhookQueue.erase(s_webhookQueue.begin());
+    saveQueueToDisk();
+
+    auto imgPath = item.imageFile;
+    auto msg = item.message;
+
+    async::spawn([imgPath, msg, targetUrl, item]() -> arc::Future<void> {
+        utils::web::MultipartForm form;
+        form.param("content", msg);
+
+        if (!imgPath.empty() && fs::exists(imgPath)) {
+            auto readResult = utils::file::readBinary(imgPath);
+            if (readResult.isOk()) {
+                form.file("file", readResult.unwrap(), "image.png", "image/png");
+            }
+        }
+
+        auto req = utils::web::WebRequest()
+            .bodyMultipart(form)
+            .timeout(std::chrono::seconds(15))
+            .post(targetUrl);
+
+        auto res = co_await std::move(req);
+
+        if (!res.ok()) {
+            log::error("queued webhook failed: {} code {}", res.errorMessage(), res.code());
+            s_webhookQueue.insert(s_webhookQueue.begin(), item);
+            saveQueueToDisk();
+            s_isFlushing = false;
+            co_return;
+        }
+
+        if (!imgPath.empty()) {
+            std::error_code ec;
+            if (fs::exists(imgPath)) fs::remove(imgPath, ec);
+        }
+
+        s_isFlushing = false;
+        if (!s_webhookQueue.empty()) {
+            co_await async::runtime().spawnBlocking<void>([]() {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            });
+            geode::Loader::get()->queueInMainThread([]() {
+                tryFlushQueue();
+            });
+        }
+    });
+}
+
+static void tryFlushQueue() {
+    if (s_isFlushing || s_webhookQueue.empty()) return;
+    s_isFlushing = true;
+    flushNext(0.f);
+}
+
 // i dont get why ppl dont read the description, i had to add this..
 // ok this might help i guess
 // another person msged me on "it doesnt work"
@@ -70,7 +264,25 @@ class $modify(EchoChokeMenuLayer, MenuLayer) {
         auto toast = EchoChokeToast::create();
         this->addChild(toast, 999);
 
+        loadQueueFromDisk();
+        if (!s_webhookQueue.empty()) {
+            this->getScheduler()->scheduleSelector(
+                schedule_selector(EchoChokeMenuLayer::checkAndFlushQueue),
+                this, 30.f, kCCRepeatForever, 5.f, false
+            );
+        }
+
         return true;
+    }
+
+    void checkAndFlushQueue(float) {
+        if (s_webhookQueue.empty()) {
+            this->getScheduler()->unscheduleSelector(
+                schedule_selector(EchoChokeMenuLayer::checkAndFlushQueue), this
+            );
+            return;
+        }
+        tryFlushQueue();
     }
 };
 
@@ -574,8 +786,14 @@ class $modify(MyPlayLayer, PlayLayer) {
         .timeout(std::chrono::seconds(15))
         .post(targetUrl);
 
-        m_fields->m_task.spawn(std::move(req), [](utils::web::WebResponse res) {
-            if (!res.ok()) log::error("webhook failed: {} code {}", res.errorMessage(), res.code());
+        m_fields->m_task.spawn(std::move(req), [msg, targetUrl](utils::web::WebResponse res) {
+            if (!res.ok()) {
+                log::error("webhook failed: {} code {}", res.errorMessage(), res.code());
+                if (!Mod::get()->getSettingValue<bool>("offline_cache")) return;
+                int64_t limit = Mod::get()->getSettingValue<int64_t>("offline_queue_limit");
+                if (limit > 0 && (int64_t)s_webhookQueue.size() >= limit) return;
+                enqueueWebhook(msg, "");
+            }
         });
     }
 
@@ -746,12 +964,22 @@ class $modify(MyPlayLayer, PlayLayer) {
             .timeout(std::chrono::seconds(15))
             .post(targetUrl);
 
-            async::spawn(
-                std::move(req),
-                [](utils::web::WebResponse res) {
-                    if (!res.ok()) log::error("webhook failed: {} code {}", res.errorMessage(), res.code());
-                }
-            );
+            auto res = co_await std::move(req);
+
+            if (!res.ok()) {
+                log::error("webhook failed: {} code {}", res.errorMessage(), res.code());
+                if (!Mod::get()->getSettingValue<bool>("offline_cache")) co_return;
+                int64_t limit = Mod::get()->getSettingValue<int64_t>("offline_queue_limit");
+                if (limit > 0 && (int64_t)s_webhookQueue.size() >= limit) co_return;
+                auto queueDir = getQueueDir();
+                std::error_code ec;
+                fs::create_directories(queueDir, ec);
+                auto savedImg = utils::string::pathToString(
+                    queueDir / fs::path(tmp).filename()
+                );
+                (void)utils::file::writeBinary(savedImg, *optData);
+                enqueueWebhook(finalMsg, savedImg);
+            }
         });
     }
 };
