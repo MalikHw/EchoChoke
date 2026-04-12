@@ -8,7 +8,7 @@
     },
     "id": "axiom.echochoke",
     "name": "EchoChoke",
-    "version": "v1.1.6",
+    "version": "v1.2.0",
     "developers": ["Axiom, Slideglide", "MalikHw47"],
     "links": {
         "source": "https://github.com/axiom-S25u/EchoChoke",
@@ -47,13 +47,13 @@
         },
         "roast_every_death": {
             "name": "Roast Every Death (no new best required)",
-            "description": "send a roast on EVERY death, not just new bests. for masochists only 💀",
+            "description": "send a roast on EVERY death, not just new bests. for masochists only ",
             "type": "bool",
             "default": false
         },
         "disable_roasts": {
             "name": "Disable Roasts",
-            "description": "turn this on if the roasts are hurting your feelings 😭",
+            "description": "turn this on if the roasts are hurting your feelings ",
             "type": "bool",
             "default": false
         },
