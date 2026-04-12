@@ -789,6 +789,9 @@ class $modify(MyPlayLayer, PlayLayer) {
         m_fields->m_task.spawn(std::move(req), [msg, targetUrl](utils::web::WebResponse res) {
             if (!res.ok()) {
                 log::error("webhook failed: {} code {}", res.errorMessage(), res.code());
+                if (!Mod::get()->getSettingValue<bool>("offline_cache")) return;
+                int64_t limit = Mod::get()->getSettingValue<int64_t>("offline_queue_limit");
+                if (limit > 0 && (int64_t)s_webhookQueue.size() >= limit) return;
                 enqueueWebhook(msg, "");
             }
         });
@@ -965,7 +968,17 @@ class $modify(MyPlayLayer, PlayLayer) {
 
             if (!res.ok()) {
                 log::error("webhook failed: {} code {}", res.errorMessage(), res.code());
-                enqueueWebhook(finalMsg, tmp);
+                if (!Mod::get()->getSettingValue<bool>("offline_cache")) co_return;
+                int64_t limit = Mod::get()->getSettingValue<int64_t>("offline_queue_limit");
+                if (limit > 0 && (int64_t)s_webhookQueue.size() >= limit) co_return;
+                auto queueDir = getQueueDir();
+                std::error_code ec;
+                fs::create_directories(queueDir, ec);
+                auto savedImg = utils::string::pathToString(
+                    queueDir / fs::path(tmp).filename()
+                );
+                (void)utils::file::writeBinary(savedImg, *optData);
+                enqueueWebhook(finalMsg, savedImg);
             }
         });
     }
