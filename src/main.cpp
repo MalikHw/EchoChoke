@@ -54,8 +54,9 @@ static void loadQueueFromDisk() {
     auto indexPath = dir / "index.json";
     if (!fs::exists(indexPath)) return;
 
-    std::string content;
-    if (!GEODE_UNWRAP_INTO_IF_OK(content, utils::file::readString(utils::string::pathToString(indexPath)))) return;
+    auto readResult = utils::file::readString(utils::string::pathToString(indexPath));
+    if (!readResult.isOk()) return;
+    std::string content = readResult.unwrap();
 
     s_webhookQueue.clear();
 
@@ -184,13 +185,14 @@ static void flushNext(float) {
             if (fs::exists(imgPath)) fs::remove(imgPath, ec);
         }
 
+        s_isFlushing = false;
         if (!s_webhookQueue.empty()) {
-            CCDirector::sharedDirector()->getScheduler()->scheduleSelector(
-                schedule_selector_cast<void (CCObject::*)(float)>([](CCObject*, float) { tryFlushQueue(); }),
-                nullptr, 0.f, 0, 1.5f, false
-            );
-        } else {
-            s_isFlushing = false;
+            co_await async::runtime().spawnBlocking<void>([]() {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            });
+            geode::Loader::get()->queueInMainThread([]() {
+                tryFlushQueue();
+            });
         }
     });
 }
