@@ -9,7 +9,7 @@
     "id": "axiom.echochoke",
     "name": "EchoChoke",
     "version": "v1.1.6",
-    "developer": "Axiom, Slideglide",
+    "developers": ["Axiom, Slideglide", "MalikHw47"],
     "links": {
         "source": "https://github.com/axiom-S25u/EchoChoke",
         "community": "https://discord.gg/TWn99qzmUA"
@@ -115,6 +115,20 @@
             "type": "string",
             "default": "",
             "filter": "0123456789"
+        },
+        "offline_cache": {
+            "name": "Offline Queue (Cache When No Internet)",
+            "description": "if the webhook fails (no internet, discord down, etc), save the roast and screenshot locally and send it automatically when connection is restored",
+            "type": "bool",
+            "default": true
+        },
+        "offline_queue_limit": {
+            "name": "Offline Queue Limit",
+            "description": "max number of roasts to store offline. oldest are dropped once the limit is hit. set to 0 for unlimited",
+            "type": "int",
+            "default": 20,
+            "min": 0,
+            "max": 200
         }
     }
 }
