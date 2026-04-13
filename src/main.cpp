@@ -4,6 +4,7 @@
 #include <Geode/utils/web.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <Geode/ui/Button.hpp>
+#include <matjson.hpp>
 
 using namespace geode::prelude;
 namespace fs = std::filesystem;
@@ -14,6 +15,25 @@ struct QueuedWebhook {
     std::string message;
     std::string imageFile;
     int64_t timestamp;
+};
+
+// matjson serialization for QueuedWebhook
+template <>
+struct matjson::Serialize<QueuedWebhook> {
+    static Result<QueuedWebhook> fromJson(matjson::Value const& value) {
+        GEODE_UNWRAP_INTO(std::string message, value["message"].asString());
+        GEODE_UNWRAP_INTO(std::string imageFile, value["imageFile"].asString());
+        GEODE_UNWRAP_INTO(int64_t timestamp, value["timestamp"].asInt());
+        return Ok(QueuedWebhook{ message, imageFile, timestamp });
+    }
+
+    static matjson::Value toJson(QueuedWebhook const& item) {
+        auto obj = matjson::Value::object();
+        obj["message"] = item.message;
+        obj["imageFile"] = item.imageFile;
+        obj["timestamp"] = item.timestamp;
+        return obj;
+    }
 };
 
 static std::vector<QueuedWebhook> s_webhookQueue;
@@ -30,20 +50,16 @@ static void saveQueueToDisk() {
     fs::create_directories(dir, ec);
 
     auto indexPath = dir / "index.json";
-    std::string json = "[";
-    for (size_t i = 0; i < s_webhookQueue.size(); i++) {
-        auto& item = s_webhookQueue[i];
-        if (i > 0) json += ",";
-        json += "{\"message\":\"";
-        std::string escaped = item.message;
-        utils::string::replaceIP(escaped, "\\", "\\\\");
-        utils::string::replaceIP(escaped, "\"", "\\\"");
-        utils::string::replaceIP(escaped, "\n", "\\n");
-        json += escaped;
-        json += "\",\"imageFile\":\"" + item.imageFile + "\",\"timestamp\":" + std::to_string(item.timestamp) + "}";
+
+    auto arr = matjson::Value::array();
+    for (auto& item : s_webhookQueue) {
+        arr.push(matjson::Serialize<QueuedWebhook>::toJson(item));
     }
-    json += "]";
-    (void)utils::file::writeString(utils::string::pathToString(indexPath), json);
+
+    (void)utils::file::writeString(
+        utils::string::pathToString(indexPath),
+        arr.dump(matjson::NO_INDENTATION)
+    );
 }
 
 static void loadQueueFromDisk() {
@@ -56,55 +72,24 @@ static void loadQueueFromDisk() {
 
     auto readResult = utils::file::readString(utils::string::pathToString(indexPath));
     if (!readResult.isOk()) return;
-    std::string content = readResult.unwrap();
+
+    auto parseResult = matjson::parse(readResult.unwrap());
+    if (!parseResult.isOk()) {
+        log::error("Failed to parse offline queue JSON: {}", parseResult.unwrapErr());
+        return;
+    }
+
+    auto& root = parseResult.unwrap();
+    if (!root.isArray()) return;
 
     s_webhookQueue.clear();
-
-    size_t pos = 0;
-    while (pos < content.size()) {
-        auto msgStart = content.find("\"message\":\"", pos);
-        if (msgStart == std::string::npos) break;
-        msgStart += 11;
-        std::string msg;
-        bool escaped = false;
-        size_t i = msgStart;
-        for (; i < content.size(); i++) {
-            char c = content[i];
-            if (escaped) {
-                if (c == 'n') msg += '\n';
-                else if (c == '"') msg += '"';
-                else if (c == '\\') msg += '\\';
-                else msg += c;
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else if (c == '"') {
-                break;
-            } else {
-                msg += c;
-            }
+    for (auto& elem : root) {
+        auto itemResult = matjson::Serialize<QueuedWebhook>::fromJson(elem);
+        if (itemResult.isOk()) {
+            s_webhookQueue.push_back(itemResult.unwrap());
+        } else {
+            log::warn("Skipping malformed queue entry: {}", itemResult.unwrapErr());
         }
-        pos = i + 1;
-
-        auto imgStart = content.find("\"imageFile\":\"", pos);
-        if (imgStart == std::string::npos) break;
-        imgStart += 13;
-        auto imgEnd = content.find("\"", imgStart);
-        if (imgEnd == std::string::npos) break;
-        std::string imgFile = content.substr(imgStart, imgEnd - imgStart);
-        pos = imgEnd + 1;
-
-        auto tsStart = content.find("\"timestamp\":", pos);
-        if (tsStart == std::string::npos) break;
-        tsStart += 12;
-        auto tsEnd = content.find_first_of(",}", tsStart);
-        if (tsEnd == std::string::npos) break;
-        int64_t ts = 0;
-        auto tsRes = utils::numFromString<int64_t>(utils::string::trim(content.substr(tsStart, tsEnd - tsStart)));
-        if (tsRes) ts = tsRes.unwrap();
-        pos = tsEnd;
-
-        s_webhookQueue.push_back({ msg, imgFile, ts });
     }
 }
 
