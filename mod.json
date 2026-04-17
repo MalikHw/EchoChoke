@@ -8,7 +8,7 @@
     },
     "id": "axiom.echochoke",
     "name": "EchoChoke",
-    "version": "v1.2.0",
+    "version": "v1.2.1",
     "developers": ["Axiom, Slideglide", "MalikHw47"],
     "links": {
         "source": "https://github.com/axiom-S25u/EchoChoke",
@@ -72,6 +72,12 @@
         "enable_platformer_roasts": {
             "name": "Enable Platformer Roasts",
             "description": "roast yourself in platformer levels too. uses session time and total grind time instead of percent since platformer doesn't have percent. uses platformer_roasts.txt for custom messages",
+            "type": "bool",
+            "default": false
+        },
+        "track_unpublished": {
+            "name": "Track Editor Levels",
+            "description": "allow roasts on editor levels (local levels with no ID). off by default so you don't spam your webhook while building",
             "type": "bool",
             "default": false
         },
