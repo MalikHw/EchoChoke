@@ -589,6 +589,12 @@ class $modify(MyPlayLayer, PlayLayer) {
 
         int levelID = m_level->m_levelID.value();
 
+        // block unpublished levels (id = 0) unless the setting is on
+        if (levelID == 0 && !Mod::get()->getSettingValue<bool>("track_unpublished")) {
+            PlayLayer::destroyPlayer(player, obj);
+            return;
+        }
+
         auto blacklistStr = Mod::get()->getSettingValue<std::string>("level_blacklist");
         if (!blacklistStr.empty()) {
             auto parts = utils::string::split(blacklistStr, ",");
@@ -706,6 +712,10 @@ class $modify(MyPlayLayer, PlayLayer) {
         if (!Mod::get()->getSettingValue<bool>("mod_enabled")) return;
 
         if (!bad && !Mod::get()->getSettingValue<bool>("disable_congrats")) {
+            // also respect track_unpublished for victory messages
+            int levelID = m_level->m_levelID.value();
+            if (levelID == 0 && !Mod::get()->getSettingValue<bool>("track_unpublished")) return;
+
             this->getScheduler()->scheduleSelector(
                 schedule_selector(MyPlayLayer::captureAndSendCongrats),
                 this, 0.3f, 0, 0.f, false
