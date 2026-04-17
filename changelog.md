@@ -1,3 +1,6 @@
+## 1.2.1
+* added setting to allow roasts on unpublished/local levels (id = 0), default off
+
 ## 1.1.2
 * fixed bugs
 
