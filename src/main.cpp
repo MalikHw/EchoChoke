@@ -227,7 +227,7 @@ protected:
         this->addChild(title);
 
         auto hint = CCLabelBMFont::create("disable toast from settings!", "chatFont.fnt");
-        hint->setScale(0.25f);
+        hint->setScale(0.36f);
         hint->setAlignment(kCCTextAlignmentCenter);
         hint->setPosition({65, 40});
         this->addChild(hint);
