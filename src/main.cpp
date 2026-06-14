@@ -226,6 +226,12 @@ protected:
         title->setPosition({65, 52});
         this->addChild(title);
 
+        auto hint = CCLabelBMFont::create("disable toast\nfrom settings!", "chatFont.fnt");
+        hint->setScale(0.18f);
+        hint->setAlignment(kCCTextAlignmentCenter);
+        hint->setPosition({65, 40});
+        this->addChild(hint);
+
         auto msg = CCLabelBMFont::create("IT WONT WORK\nUNLESS ITS A\nNEW BEST.", "bigFont.fnt");
         msg->setScale(0.22f);
         msg->setAlignment(kCCTextAlignmentCenter);
@@ -266,8 +272,10 @@ class $modify(EchoChokeMenuLayer, MenuLayer) {
     bool init() {
         if (!MenuLayer::init()) return false;
 
-        auto toast = EchoChokeToast::create();
-        this->addChild(toast, 999);
+        if (!Mod::get()->getSettingValue<bool>("no_menu_warning")) { // yes
+            auto toast = EchoChokeToast::create();
+            this->addChild(toast, 999);
+        }
 
         loadQueueFromDisk();
         if (!s_webhookQueue.empty()) {

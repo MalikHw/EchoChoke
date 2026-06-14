@@ -1,3 +1,6 @@
+## 1.4.0
+* optionality to remove the toast message from the main menu
+
 ## 1.3.1
 * New Logo (by MalikHw47)
 
