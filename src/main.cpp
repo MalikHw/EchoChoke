@@ -867,6 +867,7 @@ class $modify(MyPlayLayer, PlayLayer) {
 
         bool isPlatformerMode = m_isPlatformer;
         float percent = (victory || isPlatformerMode) ? 100.f : getCurrentPercentFloat();
+        float currentBest = static_cast<float>(m_level->m_normalPercent.value()); bool isNewBest = (victory || percent > currentBest);
         std::string raw;
 
         if (victory) {
@@ -906,6 +907,10 @@ class $modify(MyPlayLayer, PlayLayer) {
         }
 
         std::string finalMsg = formatCustomMessage(raw, percent, m_fields->m_lastBestPercent);
+
+        if (isNewBest) {
+            m_fields->m_lastBestPercent = percent;
+        }
 
         if (!victory && !isPlatformerMode && Mod::get()->getSettingValue<bool>("enable_ping")) {
             auto roleId = Mod::get()->getSettingValue<std::string>("role_id");
